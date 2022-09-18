@@ -3,7 +3,9 @@ from asyncio import run as arun
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from os import linesep
-from pathlib import Path
+from os.path import sep
+from pathlib import Path, PurePath
+from shutil import which
 from subprocess import DEVNULL, STDOUT, CalledProcessError, run
 from sys import (
     executable,
@@ -83,14 +85,18 @@ if command == "deps":
                 symlinks=not IS_WIN,
                 clear=True,
             ).create(_RT_DIR)
-            # Detect if python executable is a symlink to /nix/store, and fix it
-            pythonPath = _RT_DIR / "bin" / "python{0.major}.{0.minor}".format(version_info)
-            if "/nix/store" in str(pythonPath.resolve(strict=True)):
-                print("/nix/store path detected! Fixing symlink..")
-                from shutil import which
-                from os import remove
-                remove(pythonPath)
-                pythonPath.symlink_to(which(pythonPath.name))
+
+            nix_store = PurePath(sep) / "nix" / "store"
+            try:
+                _RT_PY.resolve(strict=True).relative_to(nix_store)
+            except (OSError, ValueError):
+                pass
+            else:
+                if py := which(f"python{version_info.major}.{version_info.minor}"):
+                    print(f"Relinking python under {nix_store}", file=stderr)
+                    _RT_PY.unlink(missing_ok=True)
+                    _RT_PY.symlink_to(py)
+
     except (ImportError, CalledProcessError):
         msg = "Please install python3-venv separately. (apt, yum, apk, etc)"
         print(msg, io_out.getvalue(), file=stderr)
